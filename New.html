@@ -1,0 +1,338 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deck Presenter</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a33;--muted:#a8b2d1;--text:#e6ebff;--border:#233056;--accent:#4aa7ff;--accent2:#6df0c2}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:radial-gradient(1200px 800px at 60% -10%,#12204a 0%, #0b1020 60%);color:var(--text)}
+    .app{display:grid;grid-template-columns:320px 1fr;height:100vh}
+    .sidebar{background:linear-gradient(180deg,#0d142a,#0a1020);border-right:1px solid var(--border);padding:14px}
+    .row{display:flex;gap:8px;align-items:center}
+    .btn{cursor:pointer;border:1px solid var(--border);background:#0c132a;color:var(--text);border-radius:10px;padding:10px 12px;font-weight:600}
+    .btn:hover{border-color:var(--accent)}
+    .decks{margin-top:12px;display:flex;flex-direction:column;gap:8px;min-height:48px}
+    .deckBtn{width:100%;text-align:left;padding:12px;border-radius:12px;border:1px solid var(--border);background:#0f1730;color:var(--muted);cursor:pointer}
+    .deckBtn.active{background:linear-gradient(180deg,#122040,#0f1730);color:var(--text);border-color:#2a3c6a}
+    .file{appearance:none;border:1px dashed var(--border);background:#0f1730;color:var(--text);border-radius:12px;padding:10px;width:100%}
+    .dz{margin-top:8px;border:1px dashed var(--border);border-radius:12px;padding:10px;text-align:center;color:var(--muted)}
+    .dz.drag{border-color:var(--accent)}
+    .content{position:relative;overflow:hidden}
+    .deck-viewport{height:100vh;overflow:hidden;position:relative}
+    .deck{position:absolute;inset:0;display:none}
+    .deck.active{display:block}
+    .frame{position:absolute;inset:0;border:0;width:100%;height:100%;background:#0c1226}
+    .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted)}
+    .title{margin:0 0 10px 0;color:var(--muted);font-size:14px}
+
+    /* Excel preview additions */
+    .sheetbar{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:8px}
+    .sheetbar select{background:#0c132a;color:#e6ebff;border:1px solid #233056;border-radius:8px;padding:6px}
+    .sheetwrap{position:absolute;inset:0;overflow:auto;padding:44px 16px 16px 16px}
+    .sheetwrap table{border-collapse:collapse;background:#0c1226;color:#e6ebff}
+    .sheetwrap table td,.sheetwrap table th{border:1px solid #233056;padding:6px 8px;white-space:nowrap}
+  </style>
+</head>
+<body>
+
+<!-- SIMPLE PASSWORD LOGIN SCREEN -->
+<div id="loginScreen" style="
+    position:fixed; inset:0; background:#0b1020; 
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    z-index:9999; font-family:ui-sans-serif; color:white;">
+  
+  <h2 style="margin-bottom:20px; font-size:22px; color:#e6ebff;">
+    Enter Access Password
+  </h2>
+
+  <input id="loginPass" type="password" placeholder="Password" 
+    style="padding:12px 14px; width:240px; border-radius:8px; border:1px solid #233056; 
+    background:#121a33; color:white; font-size:16px; outline:none; margin-bottom:12px;">
+
+  <button onclick="checkPassword()" 
+    style="padding:10px 20px; font-size:16px; border-radius:8px; border:none;
+    background:#4aa7ff; color:white; font-weight:600; cursor:pointer;">
+    Enter
+  </button>
+
+  <p id="errorMsg" style="color:#ff7070; margin-top:14px; display:none;">
+    Incorrect password. Try again.
+  </p>
+</div>
+
+<script>
+  // ❗ Change your password here:
+  const correctPassword = "cavli123";  
+
+  function checkPassword() {
+    const input = document.getElementById("loginPass").value.trim();
+    const error = document.getElementById("errorMsg");
+
+    if (input === correctPassword) {
+      document.getElementById("loginScreen").style.display = "none";
+    } else {
+      error.style.display = "block";
+      setTimeout(() => { error.style.display = "none"; }, 3000);
+    }
+  }
+
+  // Optional: Enter key support
+  document.getElementById("loginPass").addEventListener("keypress", function(e) {
+    if (e.key === "Enter") checkPassword();
+  });
+</script>
+
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <p class="title" id="meta">&nbsp;</p>
+    <div class="row">
+      <label class="btn" for="fileInput">Choose Files</label>
+      <input id="fileInput" type="file" accept=".pdf,.ppt,.pptx,.xls,.xlsx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple style="display:none;" />
+      <button id="rename" class="btn" disabled>Rename</button>
+      <button id="remove" class="btn" disabled>Remove</button>
+    </div>
+    <div id="drop" class="dz">Drag & drop PDF here</div>
+    <div class="decks" id="deckList"></div>
+  </aside>
+
+  <main class="content">
+    <div class="deck-viewport" id="viewport">
+      <section class="deck active" id="emptyDeck">
+        <div class="empty">Upload decks with the file picker or by dropping them on the left.</div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- SheetJS for local Excel rendering -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script>
+(function(){
+  const fileInput = document.getElementById('fileInput');
+  const deckList  = document.getElementById('deckList');
+  const meta      = document.getElementById('meta');
+  const btnRemove = document.getElementById('remove');
+  const btnRename = document.getElementById('rename');
+  const drop      = document.getElementById('drop');
+
+  const viewport  = document.getElementById('viewport');
+  const emptyDeck = document.getElementById('emptyDeck');
+
+  let decks = []; // {key,title,blobUrl?,type:'pdf'|'pptx'|'xls'|'xlsx',page,el,iframe?,wb?,sheets?,sheetIndex?,_sheetSelect?,_sheetWrap?}
+  let activeKey = null;
+
+  function createKey(){ return 'd'+Math.random().toString(36).slice(2,9); }
+  function handleFiles(files){ Array.from(files||[]).forEach(addDeckFromFile); }
+
+  function addDeckFromFile(file){
+    const name = file.name.replace(/\.(pdf|pptx?|xlsx?|PDF)$/i,'');
+    const key  = createKey();
+    const ext  = (file.name.split('.').pop()||'').toLowerCase();
+
+    if(ext === 'pdf'){
+      const blobUrl = URL.createObjectURL(file);
+      const deck = { key, title: name, blobUrl, type:'pdf', page:1 };
+      createDeckUI(deck, 'pdf');
+      setActive(key);
+      return;
+    }
+
+    if(ext === 'xls' || ext === 'xlsx'){
+      const reader = new FileReader();
+      reader.onload = (e)=>{
+        const data = new Uint8Array(e.target.result);
+        const wb   = XLSX.read(data, {type:'array'});
+        const sheets = wb.SheetNames.slice();
+        const deck = { key, title: name+' ('+ext+')', type: ext, wb, sheets, sheetIndex: 0, page:1 };
+        createDeckUI(deck, 'excel');
+        renderExcelSheet(deck);
+        setActive(key);
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
+    // PPT/PPTX placeholder
+    const deck = { key, title: name+" (pptx)", type:'pptx', page:1 };
+    createDeckUI(deck, 'pptx');
+    setActive(key);
+    const note = document.createElement('div');
+    note.className = 'empty';
+    note.innerHTML = 'PowerPoint cannot be previewed locally in the browser. Please export to PDF and re-upload.';
+    const sec = decks.find(d=>d.key===key).el;
+    sec.innerHTML = '';
+    sec.appendChild(note);
+  }
+
+  function createDeckUI(deck, kind){
+    // Sidebar button
+    const btn = document.createElement('button');
+    btn.className = 'deckBtn';
+    btn.dataset.key = deck.key;
+    btn.textContent = `${decks.length+1} — ${deck.title}`;
+    deckList.appendChild(btn);
+
+    // Main section
+    const section = document.createElement('section');
+    section.className = 'deck';
+    section.dataset.key = deck.key;
+
+    if(kind === 'pdf'){
+      const iframe = document.createElement('iframe');
+      iframe.className = 'frame';
+      iframe.src = deck.blobUrl + '#page=1&zoom=page-width';
+      section.appendChild(iframe);
+      deck.iframe = iframe;
+    } else if(kind === 'excel'){
+      const bar = document.createElement('div');
+      bar.className = 'sheetbar';
+      const sel = document.createElement('select');
+      deck.sheets.forEach((nm,i)=>{
+        const opt = document.createElement('option');
+        opt.value = i; opt.textContent = nm;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', ()=>{
+        deck.sheetIndex = parseInt(sel.value,10);
+        renderExcelSheet(deck);
+        updateMeta(deck);
+      });
+      bar.appendChild(sel);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'sheetwrap';
+      wrap.innerHTML = '<div class="empty">Loading…</div>';
+
+      section.appendChild(bar);
+      section.appendChild(wrap);
+
+      deck._sheetSelect = sel;
+      deck._sheetWrap   = wrap;
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'empty';
+      placeholder.textContent = 'PPT/PPTX placeholder';
+      section.appendChild(placeholder);
+    }
+
+    viewport.appendChild(section);
+    deck.el = section; decks.push(deck);
+    btn.addEventListener('click', ()=> setActive(deck.key));
+  }
+
+  function renderExcelSheet(deck){
+    const sheetName = deck.sheets[deck.sheetIndex] || deck.sheets[0];
+    const ws = deck.wb.Sheets[sheetName];
+    const html = XLSX.utils.sheet_to_html(ws, { id: "tbl_"+deck.key, editable:false, header:"", footer:"" });
+    deck._sheetWrap.innerHTML = html;
+    const tbl = deck._sheetWrap.querySelector('table');
+    if (tbl) tbl.style.width = 'max-content';
+  }
+
+  function refreshButtons(){
+    const nodes = deckList.querySelectorAll('.deckBtn');
+    nodes.forEach((n,i)=>{
+      const d = decks[i];
+      n.textContent = `${i+1} — ${d.title}`;
+      n.classList.toggle('active', d.key===activeKey);
+    });
+  }
+
+  function updateMeta(deck){
+    if(!deck){ meta.textContent=''; return; }
+    if(deck.type==='pdf'){
+      meta.textContent = deck.title + ` · page ${deck.page}`;
+    } else if(deck.type==='xls' || deck.type==='xlsx'){
+      const nm = deck.sheets[deck.sheetIndex] || '';
+      meta.textContent = deck.title + (nm ? ` · ${nm}` : '');
+    } else {
+      meta.textContent = deck.title;
+    }
+  }
+
+  function setActive(key){
+    activeKey = key;
+    const any = decks.length>0;
+
+    btnRemove.disabled = !any;
+    btnRename.disabled = !any;
+
+    Array.from(viewport.querySelectorAll('.deck')).forEach(d=>d.style.display='none');
+    if(!any){
+      emptyDeck.style.display='block';
+      meta.textContent='';
+      return;
+    }
+    emptyDeck.style.display='none';
+
+    const deck = decks.find(d=>d.key===key) || decks[0];
+    deck.el.style.display='block';
+    updateMeta(deck);
+    refreshButtons();
+  }
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e)=>{
+    const k = e.key.toLowerCase();
+    if(['1','2','3','4','5','6','7','8','9'].includes(e.key)){
+      const idx = parseInt(e.key,10)-1; if(decks[idx]) setActive(decks[idx].key);
+    }
+    if(k==='arrowright'){
+      const d = decks.find(x=>x.key===activeKey);
+      if(!d) return;
+      if(d.type==='pdf'){ d.page++; updateMeta(d); }
+      if(d.type==='xls' || d.type==='xlsx'){
+        if(d.sheetIndex < d.sheets.length-1){
+          d.sheetIndex++; d._sheetSelect.value = d.sheetIndex; renderExcelSheet(d); updateMeta(d);
+        }
+      }
+    }
+    if(k==='arrowleft'){
+      const d = decks.find(x=>x.key===activeKey);
+      if(!d) return;
+      if(d.type==='pdf'){ d.page = Math.max(1,(d.page||1)-1); updateMeta(d); }
+      if(d.type==='xls' || d.type==='xlsx'){
+        if(d.sheetIndex > 0){
+          d.sheetIndex--; d._sheetSelect.value = d.sheetIndex; renderExcelSheet(d); updateMeta(d);
+        }
+      }
+    }
+  });
+
+  // Input & DnD
+  fileInput.addEventListener('change', (e)=>{ handleFiles(e.target.files); fileInput.value=''; });
+  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}));
+  drop.addEventListener('drop',(e)=>{ handleFiles(e.dataTransfer.files); });
+
+  // Rename
+  btnRename.addEventListener('click', () => {
+    const d = decks.find(x => x.key === activeKey);
+    if (!d) return;
+    const newTitle = prompt('Enter new deck name:', d.title);
+    if (!newTitle) return;
+    d.title = newTitle.trim();
+    refreshButtons(); updateMeta(d);
+  });
+
+  // Remove
+  btnRemove.addEventListener('click', ()=>{
+    const d = decks.find(x=>x.key===activeKey); if(!d) return;
+    if(!confirm('Remove deck "'+d.title+'"?')) return;
+    if(d.blobUrl) URL.revokeObjectURL(d.blobUrl);
+    d.el.remove();
+    const idx = decks.findIndex(x=>x.key===d.key);
+    if(idx>-1 && deckList.children[idx]) deckList.removeChild(deckList.children[idx]);
+    decks.splice(idx,1);
+    setActive(decks[0]?.key || null);
+  });
+})();
+</script>
+</body>
+</html>
